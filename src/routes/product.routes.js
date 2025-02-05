@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { Product, ProductMedia } = require('../models/product.model');
+const { Product } = require('../models/product.model');
 const productValidation = require('../validations/product.validation');
 
 // Validation middleware
@@ -9,21 +9,74 @@ const validate = (schema) => async (req, res, next) => {
     await schema.validateAsync(req.body);
     next();
   } catch (error) {
-    return res.status(400).json({ error: error.details[0].message });
+    res.status(400).json({ error: error.details[0].message });
   }
 };
 
-// List products with filters and pagination
+// Create a new product
+router.post('/', validate(productValidation.create), async (req, res) => {
+  try {
+    // Check for duplicate SKU
+    const existingProduct = await Product.findOne({ SKU: req.body.SKU });
+    if (existingProduct) {
+      return res.status(400).json({ error: 'Duplicate SKU not allowed' });
+    }
+
+    const product = new Product(req.body);
+    await product.save();
+    
+    // Populate and return the saved product
+    const populatedProduct = await Product.findById(product._id)
+      .populate('category_id')
+      .populate('material_ids');
+      
+    res.status(201).json(populatedProduct);
+  } catch (error) {
+    res.status(400).json({ message: error.message });
+  }
+});
+
+// Update a product
+router.put('/:id', validate(productValidation.update), async (req, res) => {
+  try {
+    const product = await Product.findByIdAndUpdate(
+      req.params.id,
+      req.body,
+      { new: true }
+    )
+    .populate('category_id')
+    .populate('material_ids');
+    
+    if (!product) {
+      return res.status(404).json({ message: 'Product not found' });
+    }
+    res.json(product);
+  } catch (error) {
+    res.status(400).json({ message: error.message });
+  }
+});
+
+// Get all products
 router.get('/', async (req, res) => {
   try {
-    const { page = 1, limit = 10, SKU, product_name, category_id, material_ids, status } = req.query;
-    
+    const { page = 1, limit = 10, ...filters } = req.query;
     const query = {};
-    if (SKU) query.SKU = { $regex: SKU, $options: 'i' };
-    if (product_name) query.product_name = { $regex: product_name, $options: 'i' };
-    if (category_id) query.category_id = category_id;
-    if (material_ids) query.material_ids = { $in: material_ids.split(',') };
-    if (status) query.status = status;
+
+    if (filters.SKU) {
+      query.SKU = { $regex: filters.SKU, $options: 'i' };
+    }
+    if (filters.product_name) {
+      query.product_name = { $regex: filters.product_name, $options: 'i' };
+    }
+    if (filters.category_id) {
+      query.category_id = filters.category_id;
+    }
+    if (filters.material_ids) {
+      query.material_ids = { $in: filters.material_ids.split(',') };
+    }
+    if (filters.status) {
+      query.status = filters.status;
+    }
 
     const products = await Product.find(query)
       .populate('category_id')
@@ -31,137 +84,88 @@ router.get('/', async (req, res) => {
       .skip((page - 1) * limit)
       .limit(parseInt(limit));
 
-    const total = await Product.countDocuments(query);
+    const totalProducts = await Product.countDocuments(query);
 
-    res.status(200).json({
+    res.json({
       products,
-      totalPages: Math.ceil(total / limit),
-      currentPage: page
+      totalProducts,
+      currentPage: parseInt(page),
+      totalPages: Math.ceil(totalProducts / limit)
     });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ message: error.message });
   }
 });
 
-// Create product
-router.post('/', validate(productValidation.create), async (req, res) => {
-  try {
-    const existingSKU = await Product.findOne({ SKU: req.body.SKU });
-    if (existingSKU) {
-      return res.status(400).json({ error: 'Duplicate SKU not allowed' });
-    }
-
-    const product = new Product(req.body);
-    await product.save();
-    res.status(201).json(product);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Update product
-router.put('/:id', validate(productValidation.update), async (req, res) => {
-  try {
-    const product = await Product.findByIdAndUpdate(
-      req.params.id,
-      req.body,
-      { new: true }
-    );
-    if (!product) {
-      return res.status(404).json({ error: 'Product not found' });
-    }
-    res.status(200).json(product);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Delete product
+// Delete a product
 router.delete('/:id', async (req, res) => {
   try {
     const product = await Product.findByIdAndDelete(req.params.id);
     if (!product) {
-      return res.status(404).json({ error: 'Product not found' });
+      return res.status(404).json({ message: 'Product not found' });
     }
-    await ProductMedia.deleteMany({ product_id: req.params.id });
-    res.status(200).json({ message: 'Product deleted successfully' });
+    res.json({ message: 'Product deleted successfully' });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ message: error.message });
   }
 });
 
-// Get statistics
+// Get product statistics
 router.get('/statistics', async (req, res) => {
   try {
-    // Category wise highest price
-    const categoryHighestPrice = await Product.aggregate([
-      {
-        $group: {
-          _id: '$category_id',
-          highestPrice: { $max: '$price' }
+    const [categoryHighestPrice, priceRangeCount, productsWithNoMedia] = await Promise.all([
+      Product.aggregate([
+        {
+          $group: {
+            _id: '$category_id',
+            highestPrice: { $max: '$price' },
+          }
+        },
+        {
+          $lookup: {
+            from: 'categories',
+            localField: '_id',
+            foreignField: '_id',
+            as: 'category'
+          }
         }
-      },
-      {
-        $lookup: {
-          from: 'categories',
-          localField: '_id',
-          foreignField: '_id',
-          as: 'category'
+      ]),
+      Product.aggregate([
+        {
+          $facet: {
+            '0-500': [
+              { $match: { price: { $gte: 0, $lte: 500 } } },
+              { $count: 'count' }
+            ],
+            '501-1000': [
+              { $match: { price: { $gt: 500, $lte: 1000 } } },
+              { $count: 'count' }
+            ],
+            '1000+': [
+              { $match: { price: { $gt: 1000 } } },
+              { $count: 'count' }
+            ]
+          }
         }
-      }
+      ]),
+      Product.find({
+        $or: [
+          { media_url: { $exists: false } },
+          { media_url: null },
+          { media_url: '' }
+        ]
+      })
+        .select('product_name media_url price')
+        .sort({ product_name: 1 })
     ]);
 
-    // Price range wise product count
-    const priceRangeCount = await Product.aggregate([
-      {
-        $facet: {
-          '0-500': [
-            { $match: { price: { $gte: 0, $lte: 500 } } },
-            { $count: 'count' }
-          ],
-          '501-1000': [
-            { $match: { price: { $gt: 500, $lte: 1000 } } },
-            { $count: 'count' }
-          ],
-          '1000+': [
-            { $match: { price: { $gt: 1000 } } },
-            { $count: 'count' }
-          ]
-        }
-      }
-    ]);
-
-    // Format the price range count result with default values
-    const formattedPriceRangeCount = {
-      "0-500": priceRangeCount[0]['0-500'][0]?.count || 0,
-      "501-1000": priceRangeCount[0]['501-1000'][0]?.count || 0,
-      "1000+": priceRangeCount[0]['1000+'][0]?.count || 0
-    };
-
-    // Products with no media
-    const productsWithNoMedia = await Product.aggregate([
-      {
-        $lookup: {
-          from: 'productmedias',
-          localField: '_id',
-          foreignField: 'product_id',
-          as: 'media'
-        }
-      },
-      {
-        $match: {
-          media: { $size: 0 }
-        }
-      }
-    ]);
-
-    res.status(200).json({
+    res.json({
       categoryHighestPrice,
-      priceRangeCount: formattedPriceRangeCount,
+      priceRangeCount: priceRangeCount[0],
       productsWithNoMedia
     });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ message: error.message });
   }
 });
 

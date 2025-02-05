@@ -37,46 +37,19 @@ const productSchema = new mongoose.Schema({
     type: String,
     enum: ['active', 'inactive'],
     default: 'active'
+  },
+  media_url: {
+    type: String,
+    required: false,
+    default: ''
   }
 }, {
   timestamps: true,
   toJSON: { getters: true }
 });
 
-const materialSchema = new mongoose.Schema({
-  material_name: {
-    type: String,
-    required: true
-  }
-});
-
-const categorySchema = new mongoose.Schema({
-  category_name: {
-    type: String,
-    required: true
-  }
-});
-
-const productMediaSchema = new mongoose.Schema({
-  product_id: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Product',
-    required: true
-  },
-  url: {
-    type: String,
-    required: true
-  }
-});
-
 const Product = mongoose.model('Product', productSchema);
-const Material = mongoose.model('Material', materialSchema);
-const Category = mongoose.model('Category', categorySchema);
-const ProductMedia = mongoose.model('ProductMedia', productMediaSchema);
 
 module.exports = {
-  Product,
-  Material,
-  Category,
-  ProductMedia
+  Product
 };

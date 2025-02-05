@@ -7,15 +7,18 @@ const productValidation = {
     category_id: Joi.string().required(),
     material_ids: Joi.array().items(Joi.string()).required(),
     price: Joi.number().required().min(0),
-    status: Joi.string().valid('active', 'inactive')
+    status: Joi.string().valid('active', 'inactive'),
+    media_url: Joi.string().allow(null, '').optional()
   }),
   
   update: Joi.object({
+    SKU: Joi.string(),
     product_name: Joi.string(),
     category_id: Joi.string(),
     material_ids: Joi.array().items(Joi.string()),
     price: Joi.number().min(0),
-    status: Joi.string().valid('active', 'inactive')
+    status: Joi.string().valid('active', 'inactive'),
+    media_url: Joi.string().allow(null, '').optional()
   }),
 
   queryParams: Joi.object({

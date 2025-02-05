@@ -131,6 +131,13 @@ router.get('/statistics', async (req, res) => {
       }
     ]);
 
+    // Format the price range count result with default values
+    const formattedPriceRangeCount = {
+      "0-500": priceRangeCount[0]['0-500'][0]?.count || 0,
+      "501-1000": priceRangeCount[0]['501-1000'][0]?.count || 0,
+      "1000+": priceRangeCount[0]['1000+'][0]?.count || 0
+    };
+
     // Products with no media
     const productsWithNoMedia = await Product.aggregate([
       {
@@ -150,7 +157,7 @@ router.get('/statistics', async (req, res) => {
 
     res.status(200).json({
       categoryHighestPrice,
-      priceRangeCount: priceRangeCount[0],
+      priceRangeCount: formattedPriceRangeCount,
       productsWithNoMedia
     });
   } catch (error) {

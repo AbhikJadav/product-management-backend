@@ -23,6 +23,12 @@ app.use(express.json());
 app.use('/api/products', productRoutes);
 app.use('/api', categoryMaterialRoutes);
 
+// Error handling middleware
+app.use((err, req, res, next) => {
+  console.error(err.stack);
+  res.status(500).send('Something broke!');
+});
+
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
 });

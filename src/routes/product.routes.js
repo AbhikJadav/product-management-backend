@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { Product } = require('../models/product.model');
+const { Product, Category } = require('../models');
 const productValidation = require('../validations/product.validation');
 
 // Validation middleware
@@ -113,22 +113,65 @@ router.delete('/:id', async (req, res) => {
 // Get product statistics
 router.get('/statistics', async (req, res) => {
   try {
-    const [categoryHighestPrice, priceRangeCount, productsWithNoMedia] = await Promise.all([
-      Product.aggregate([
+    // Get all products with populated category and material information
+    const products = await Product.find()
+      .populate('category_id')
+      .populate('material_ids');
+
+    // Calculate statistics
+    const totalProducts = products.length;
+    const activeProducts = products.filter(p => p.status === 'active').length;
+    const totalValue = products.reduce((sum, product) => sum + (product.price || 0), 0);
+
+    // Get products without media
+    const productsWithNoMedia = await Product.find({
+      $or: [
+        { media_url: { $exists: false } },
+        { media_url: null },
+        { media_url: '' }
+      ]
+    })
+    .populate('category_id')
+    .select('_id SKU product_name category_id');
+
+    const result = await Promise.all([
+      // Get categories with non-zero highest prices
+      Category.aggregate([
         {
-          $group: {
-            _id: '$category_id',
-            highestPrice: { $max: '$price' },
+          $lookup: {
+            from: 'products',
+            localField: '_id',
+            foreignField: 'category_id',
+            as: 'products'
           }
         },
         {
-          $lookup: {
-            from: 'categories',
-            localField: '_id',
-            foreignField: '_id',
-            as: 'category'
+          $project: {
+            _id: 1,
+            category: [{
+              category_name: '$category_name'
+            }],
+            highestPrice: {
+              $max: '$products.price'
+            },
+            productCount: {
+              $size: {
+                $filter: {
+                  input: '$products',
+                  as: 'product',
+                  cond: { $gt: ['$$product.price', 0] }
+                }
+              }
+            }
           }
-        }
+        },
+        {
+          $match: {
+            highestPrice: { $gt: 0 },
+            productCount: { $gt: 0 }
+          }
+        },
+        { $sort: { highestPrice: -1 } }
       ]),
       Product.aggregate([
         {
@@ -147,24 +190,19 @@ router.get('/statistics', async (req, res) => {
             ]
           }
         }
-      ]),
-      Product.find({
-        $or: [
-          { media_url: { $exists: false } },
-          { media_url: null },
-          { media_url: '' }
-        ]
-      })
-        .select('product_name media_url price')
-        .sort({ product_name: 1 })
+      ])
     ]);
 
     res.json({
-      categoryHighestPrice,
-      priceRangeCount: priceRangeCount[0],
+      totalProducts,
+      activeProducts,
+      totalValue,
+      categoryHighestPrice: result[0],
+      priceRangeCount: result[1][0],
       productsWithNoMedia
     });
   } catch (error) {
+    console.error('Statistics Error:', error);
     res.status(500).json({ message: error.message });
   }
 });

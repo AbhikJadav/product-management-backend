@@ -27,7 +27,10 @@ router.post('/', validate(productValidation.create), async (req, res) => {
     
     // Populate and return the saved product
     const populatedProduct = await Product.findById(product._id)
-      .populate('category_id')
+      .populate({
+        path: 'category_id',
+        select: '_id category_name'
+      })
       .populate('material_ids');
       
     res.status(201).json(populatedProduct);
@@ -44,7 +47,10 @@ router.put('/:id', validate(productValidation.update), async (req, res) => {
       req.body,
       { new: true }
     )
-    .populate('category_id')
+    .populate({
+      path: 'category_id',
+      select: '_id category_name'
+    })
     .populate('material_ids');
     
     if (!product) {
@@ -79,15 +85,34 @@ router.get('/', async (req, res) => {
     }
 
     const products = await Product.find(query)
-      .populate('category_id')
+      .populate({
+        path: 'category_id',
+        select: '_id category_name'
+      })
       .populate('material_ids')
       .skip((page - 1) * limit)
       .limit(parseInt(limit));
 
+    // Transform the response to include both category_id and category_name and decrypted SKU
+    const transformedProducts = products.map(product => {
+      const plainProduct = product.toObject({ getters: true }); 
+      if (plainProduct.category_id) {
+        const { category_id } = plainProduct;
+        return {
+          ...plainProduct,
+          category_id: {
+            category_id: category_id._id,
+            category_name: category_id.category_name
+          }
+        };
+      }
+      return plainProduct;
+    });
+
     const totalProducts = await Product.countDocuments(query);
 
     res.json({
-      products,
+      products: transformedProducts,
       totalProducts,
       currentPage: parseInt(page),
       totalPages: Math.ceil(totalProducts / limit)
@@ -115,7 +140,10 @@ router.get('/statistics', async (req, res) => {
   try {
     // Get all products with populated category and material information
     const products = await Product.find()
-      .populate('category_id')
+      .populate({
+        path: 'category_id',
+        select: '_id category_name'
+      })
       .populate('material_ids');
 
     // Calculate statistics
@@ -131,7 +159,10 @@ router.get('/statistics', async (req, res) => {
         { media_url: '' }
       ]
     })
-    .populate('category_id')
+    .populate({
+      path: 'category_id',
+      select: '_id category_name'
+    })
     .select('_id SKU product_name category_id');
 
     const result = await Promise.all([
